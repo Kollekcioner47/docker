@@ -1,0 +1,54 @@
+опишем наш стэк
+создадим файл stack.yml на управляющей ноде
+в нём пропишем:
+
+version: "3"
+
+services:
+    wordpers:
+        image: wordpress
+        ports:
+            - 80:80
+        environment:
+            WORDPRESS_DB_HOST: mysql
+            WORDPRESS_DB_NAME: wp
+            WORDPRESS_DB_USER: wp
+            WORDPRESS_DB_PASSWORD: wp_pass
+
+
+    mysql:
+        image: mysql:5.7
+        environment:
+            MYSQL_USER: wp
+            MYSQL_DATABASE: wp
+            MYSQL_PASSWORD: wp_pass
+            MYSQL_ROOT_PASSWORD: root
+
+
+    phpmyadmin:
+        image: phpmyadmin
+        ports:
+            - 8080:80
+        environment:
+            PMA_HOST: mysql
+
+
+сохраним файл и запустим его
+docker stack deploy -c stack.yml wp
+
+
+посмотреть список стэков
+docker stack ls
+
+какие сервисы запущены на стеке
+
+docker stack services pw
+docker service ls
+
+список контейнеров 
+docker service ps pw ps_mysql.1
+
+инспекция сервиса
+docker service inpsect pw_wordpress
+
+
