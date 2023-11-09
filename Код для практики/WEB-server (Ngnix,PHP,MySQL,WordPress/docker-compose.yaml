@@ -1,0 +1,52 @@
+version: '3.9' #Версия самого docker compose сожет быть важно для поддержки директив compose
+
+services: #Описание контейнеров
+  mysql: #Образ, который положим в конейнер
+    image: mysql:8.0
+    container_name: mysql8 #Имя контейнера
+    restart: unless-stopped #Политика ребута
+    env_file: .env #Файл, в котором описаны переменные
+    volumes: #Подключаем именованные тома в контейнер
+      - dbfile:/var/lib/mysql
+    command: '--default-authentication-plugin=mysql_native_password' #передаём команду приложению
+    networks:
+      - app
+
+  wp:
+    image: wordpress:5.7.0-php8.0-fpm
+    container_name: wordpress-5.7.0-php8.0-fpm
+    depends_on: #Какой контейнер запустить сначала
+      - mysql
+    restart: unless-stopped
+    env_file: .env
+    environment: #Подключаем переменые из файлика
+      - WORDPRESS_DB_HOST=mysql:3306
+      - WORDPRESS_DB_USER=$MYSQL_USER
+      - WORDPRESS_DB_PASSWORD=$MYSQL_PASSWORD
+      - WORDPRESS_DB_NAME=$MYSQL_DATABASE
+    volumes:
+      - www-html:/var/www/html
+    networks:
+      - app
+
+  nginx:
+    image: nginx:1.19.8-alpine
+    depends_on:
+      - wp
+    container_name: nginx-1.19.8-alpine
+    restart: unless-stopped
+    ports: #Прокидываем порты
+      - "80:80" #Порт хоста:порт контейнера
+    volumes:
+      - www-html:/var/www/html
+      - ./nginx-conf.d:/etc/nginx/conf.d #конфиг nginx берём из папки проекта
+    networks:
+      - app
+
+volumes: #Именованые volume для прокидывание в контейнер, путь по умолчанию /var/lib/docker/volumes
+  www-html:
+  dbfile:
+
+networks: #Описание сети
+  app:
+    driver: bridge
