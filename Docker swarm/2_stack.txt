@@ -27,8 +27,8 @@ services:
       - MYSQL_PASSWORD=wp_pass
       - MYSQL_DATABASE=wp
     deploy:
-      placement::
-        constraint: [node.role == manager]
+      placement:
+        constraints: [node.role == manager]
   
   phpmyadmin:
     image: phpmyadmin
@@ -57,6 +57,7 @@ docker service ps pw ps_mysql.1
 
 инспекция сервиса
 docker service inpsect pw_wordpress
+
 
 
 
