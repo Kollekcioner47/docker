@@ -5,32 +5,39 @@
 version: "3"
 
 services:
-    wordpers:
-        image: wordpress
-        ports:
-            - 80:80
-        environment:
-            WORDPRESS_DB_HOST: mysql
-            WORDPRESS_DB_NAME: wp
-            WORDPRESS_DB_USER: wp
-            WORDPRESS_DB_PASSWORD: wp_pass
-
-
-    mysql:
-        image: mysql:5.7
-        environment:
-            MYSQL_USER: wp
-            MYSQL_DATABASE: wp
-            MYSQL_PASSWORD: wp_pass
-            MYSQL_ROOT_PASSWORD: root
-
-
-    phpmyadmin:
-        image: phpmyadmin
-        ports:
-            - 8080:80
-        environment:
-            PMA_HOST: mysql
+  wordpress:
+    image: wordpress
+    ports:
+      - 81:80
+    environment:
+      - WORDPRESS_DB_HOST=mysql2
+      - WORDPRESS_DB_USER=wp
+      - WORDPRESS_DB_PASSWORD=wp_pass
+      - WORDPRESS_DB_NAME=wp
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+  
+  mysql2:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_USER=wp
+      - MYSQL_PASSWORD=wp_pass
+      - MYSQL_DATABASE=wp
+    deploy:
+      placement::
+        constraint: [node.role == manager]
+  
+  phpmyadmin:
+    image: phpmyadmin
+    ports:
+      - 8080:80
+    environment:
+      - PMA_HOST=mysql2
+    deploy:
+      replicas: 2
 
 
 сохраним файл и запустим его
@@ -50,5 +57,6 @@ docker service ps pw ps_mysql.1
 
 инспекция сервиса
 docker service inpsect pw_wordpress
+
 
 
