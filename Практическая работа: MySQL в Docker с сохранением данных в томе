@@ -1,0 +1,83 @@
+Практическая работа: MySQL в Docker с сохранением данных в томе
+Цель:
+Научиться запускать контейнер с MySQL, подключаться к нему, сохранять базу данных в Docker-томе и убедиться, что данные не теряются при удалении и пересоздании контейнера.
+
+Что потребуется:
+
+Установленный Docker (проверьте: docker --version).
+
+Клиент MySQL на хосте (опционально, можно использовать docker exec).
+
+Базовое знание SQL.
+
+Шаг 1. Создаём именованный том
+Том будет хранить все файлы данных MySQL (таблицы, индексы и т.д.) на хосте, но управляться Docker'ом.
+
+docker volume create mysql-data
+Проверить, что том создан:
+docker volume ls
+
+Шаг 2. Запускаем контейнер MySQL с томом и переменными окружения
+Запустим официальный образ mysql:8.0 (или mysql:5.7), указав:
+пароль для root (обязательно),
+имя тома для /var/lib/mysql (внутренняя папка данных MySQL),
+проброс порта 3306 на хост (чтобы можно было подключиться извне),
+имя контейнера для удобства.
+
+docker run -d \
+  --name mysql-lab \
+  -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=mysecretpass \
+  -v mysql-data:/var/lib/mysql \
+  mysql:8.0
+Объяснение флагов:
+-d – запуск в фоне (detach).
+--name – задаём имя контейнера.
+-p – пробрасываем порт хоста на порт контейнера.
+-e MYSQL_ROOT_PASSWORD – обязательная переменная для установки пароля root.
+-v mysql-data:/var/lib/mysql – монтируем наш том в директорию данных MySQL.
+
+Шаг 3. Проверяем, что контейнер запущен и работает
+docker ps | grep mysql-lab
+Посмотреть логи (на случай ошибок):
+docker logs mysql-lab
+
+Шаг 4. Подключаемся к MySQL и создаём тестовую базу с данными
+
+docker exec -it mysql-lab mysql -uroot -pmysecretpass
+
+Внутри оболочки MySQL выполните:
+CREATE DATABASE testdb;
+USE testdb;
+CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100));
+INSERT INTO users (name) VALUES ('Alice'), ('Bob');
+SELECT * FROM users;
+Выйдите из MySQL: exit
+
+Шаг 5. Останавливаем и удаляем контейнер (том остаётся)
+bash
+docker stop mysql-lab
+docker rm mysql-lab
+Убедитесь, что контейнера больше нет:
+
+docker ps -a | grep mysql-lab
+Но том mysql-data всё ещё существует:
+
+docker volume ls
+Шаг 6. Запускаем новый контейнер с тем же томом и проверяем данные
+Запускаем MySQL снова, используя тот же том, но другое имя контейнера (можно и то же, но старый удалён).
+
+bash
+docker run -d \
+  --name mysql-lab-new \
+  -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=mysecretpass \
+  -v mysql-data:/var/lib/mysql \
+  mysql:8.0
+Подождите 10–15 секунд, пока MySQL инициализируется (он обнаружит существующие данные). Затем подключитесь:
+
+docker exec -it mysql-lab-new mysql -uroot -pmysecretpass
+Выполните:
+USE testdb;
+SELECT * FROM users;
+Вы должны увидеть ранее вставленные записи Alice и Bob.
