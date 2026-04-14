@@ -11,7 +11,7 @@ services:
       - app
   
   wp:
-    image: wordpress
+    image: wordpress:6.9-php8.2-fpm
     container_name: wp
     depends_on:
       - mysql
