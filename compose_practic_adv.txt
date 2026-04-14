@@ -1,0 +1,343 @@
+Практика: Сервис коротких ссылок с кэшированием и реверс-прокси (Docker Compose)
+Что вы получите
+Вы создадите полноценный микросервисный проект, который:
+генерирует короткие ссылки (аналог bit.ly);
+хранит данные в PostgreSQL;
+кэширует популярные ссылки в Redis;
+отдаёт статический фронтенд через Nginx;
+использует reverse-proxy для маршрутизации запросов.
+
+Вы научитесь:
+описывать связанные сервисы в docker-compose.yml;
+управлять переменными окружения;
+монтировать volumes для данных и конфигов;
+настраивать сети между контейнерами;
+
+1. Структура проекта
+shortlink/
+├── app/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── app.py
+├── nginx/
+│   └── default.conf
+├── static/
+│   └── index.html
+├── docker-compose.yml
+└── .env
+
+# Создать корневую папку проекта
+mkdir -p shortlink/app shortlink/nginx shortlink/static
+# Создать пустые файлы в app/
+touch shortlink/app/Dockerfile
+touch shortlink/app/requirements.txt
+touch shortlink/app/app.py
+# Создать пустой файл в nginx/
+touch shortlink/nginx/default.conf
+# Создать пустой файл в static/
+touch shortlink/static/index.html
+# Создать пустые файлы в корне shortlink/
+touch shortlink/docker-compose.yml
+touch shortlink/.env
+
+2. Сервис приложения (Flask + PostgreSQL + Redis)
+содержимое файла app/requirements.txt:
+
+flask
+psycopg2-binary
+redis
+
+содержимое файла app/app.py:
+import os
+import random
+import logging
+from string import ascii_letters, digits
+
+import redis
+import psycopg2
+from psycopg2 import IntegrityError
+from flask import Flask, request, jsonify, redirect
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# Конфигурация из переменных окружения
+POSTGRES_HOST = os.environ['POSTGRES_HOST']
+POSTGRES_DB = os.environ['POSTGRES_DB']
+POSTGRES_USER = os.environ['POSTGRES_USER']
+POSTGRES_PASSWORD = os.environ['POSTGRES_PASSWORD']
+REDIS_HOST = os.environ['REDIS_HOST']
+BASE_URL = os.environ.get('BASE_URL', 'http://localhost')  # для продакшена переопределить
+
+# Глобальный клиент Redis (лёгкий и потокобезопасный)
+try:
+    redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+    redis_client.ping()
+    logger.info("Redis connected")
+except Exception as e:
+    logger.error(f"Redis connection failed: {e}")
+    redis_client = None
+
+def get_db_connection():
+    """Создаёт новое соединение с PostgreSQL для каждого запроса."""
+    return psycopg2.connect(
+        host=POSTGRES_HOST,
+        database=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD
+    )
+
+def init_db():
+    """Создаёт таблицу links, если её нет."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS links (
+                    short_code TEXT PRIMARY KEY,
+                    long_url TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            logger.info("Database table ensured")
+    finally:
+        conn.close()
+
+# Инициализируем БД при старте приложения
+init_db()
+
+def generate_code(length=6):
+    chars = ascii_letters + digits
+    return ''.join(random.choices(chars, k=length))
+
+def generate_unique_code(conn, long_url, max_attempts=5):
+    """Генерирует уникальный short_code, повторяя при коллизиях."""
+    for attempt in range(max_attempts):
+        code = generate_code()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO links (short_code, long_url) VALUES (%s, %s)",
+                    (code, long_url)
+                )
+                conn.commit()
+                return code
+        except IntegrityError:
+            conn.rollback()
+            logger.warning(f"Collision on code '{code}', retrying...")
+            continue
+    raise RuntimeError("Could not generate unique short code after several attempts")
+
+@app.route('/api/shorten', methods=['POST'])
+def shorten():
+    data = request.get_json()
+    long_url = data.get('long_url')
+    if not long_url:
+        return jsonify({'error': 'Missing long_url'}), 400
+
+    conn = get_db_connection()
+    try:
+        code = generate_unique_code(conn, long_url)
+        # Кэшируем новую ссылку (если Redis доступен)
+        if redis_client:
+            try:
+                redis_client.setex(f"redirect:{code}", 300, long_url)
+            except Exception as e:
+                logger.error(f"Redis setex failed: {e}")
+        short_url = f"{BASE_URL}/{code}"
+        return jsonify({'short_code': code, 'short_url': short_url})
+    except Exception as e:
+        logger.exception("Error while shortening URL")
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        conn.close()
+
+@app.route('/<code>')
+def redirect_to_long(code):
+    # Проверяем кэш (если Redis работает)
+    if redis_client:
+        try:
+            long_url = redis_client.get(f"redirect:{code}")
+            if long_url:
+                logger.debug(f"Cache hit for {code}")
+                return redirect(long_url)
+        except Exception as e:
+            logger.error(f"Redis get failed: {e}")
+
+    # Ищем в БД
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT long_url FROM links WHERE short_code = %s", (code,))
+            row = cur.fetchone()
+        if row:
+            long_url = row[0]
+            # Записываем в кэш на будущее (если Redis доступен)
+            if redis_client:
+                try:
+                    redis_client.setex(f"redirect:{code}", 300, long_url)
+                except Exception as e:
+                    logger.error(f"Redis setex failed: {e}")
+            return redirect(long_url)
+        else:
+            return "Not found", 404
+    finally:
+        conn.close()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000)
+
+содержимое файла app/Dockerfile:
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+CMD ["python", "app.py"]
+
+3. Статический фронтенд
+содержимое файла static/index.html:
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ShortLink</title>
+</head>
+<body>
+    <h1>Сервис коротких ссылок</h1>
+    <input type="url" id="longUrl" placeholder="Введите длинную ссылку" size="50">
+    <button onclick="shorten()">Сократить</button>
+    <p>Результат: <span id="result"></span></p>
+    <script>
+        async function shorten() {
+            const longUrl = document.getElementById('longUrl').value;
+            const res = await fetch('/api/shorten', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({long_url: longUrl})
+            });
+            const data = await res.json();
+            if (data.short_url) {
+                document.getElementById('result').innerHTML = `<a href="${data.short_url}" target="_blank">${data.short_url}</a>`;
+            } else {
+                document.getElementById('result').innerText = 'Ошибка';
+            }
+        }
+    </script>
+</body>
+</html>
+
+4. Reverse-proxy (Nginx)
+содержимое файла nginx/default.conf:
+server {
+    listen 80;
+    server_name localhost;
+
+    # Статика
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri /index.html;
+    }
+
+    # Прокси на Flask API
+    location /api/ {
+        proxy_pass http://web:8000;
+        proxy_set_header Host $host;
+    }
+
+    # Прокси для редиректов (короткие коды)
+    location ~ ^/[a-zA-Z0-9]+$ {
+        proxy_pass http://web:8000$request_uri;
+        proxy_set_header Host $host;
+    }
+}
+
+5. Главный docker-compose.yml
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: ./app
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./static:/usr/share/nginx/html
+    depends_on:
+      - web
+    networks:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  backend:
+
+содержимое файла .env:
+POSTGRES_DB=shortlink
+POSTGRES_USER=admin
+POSTGRES_PASSWORD=supersecret
+
+6. Запуск и тестирование
+docker compose up -d --build
+
+Проверка:
+Откройте в браузере http://localhost → увидите форму.
+Введите любую ссылку (например, https://ru.wikipedia.org/wiki/Docker_(%D1%82%D0%B5%D1%85%D0%BD%D0%BE%D0%BB%D0%BE%D0%B3%D0%B8%D1%8F)) → получите http://localhost/Ab3Xy7.
+Перейдите по короткой ссылке → редирект на оригинал.
+Остановите контейнер redis (docker compose stop redis) – редирект всё равно будет работать (берётся из БД), но кэш перестанет заполняться.
+
+Полезные команды:
+docker compose logs -f web          # смотреть логи бэкенда
+docker compose exec db psql -U admin -d shortlink   # зайти в БД
+docker compose exec redis redis-cli                 # зайти в Redis
+docker compose down -v              # полностью удалить всё (включая volumes с данными)
+
