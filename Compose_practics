@@ -1,0 +1,161 @@
+1 Создание веб-приложения
+Описание приложения
+Тип:
+Веб-приложение "Заметки" на Flask, работающее в контейнере Docker.
+________________________________________
+Основные функции
+•	Инициализация базы данных
+o	При запуске создаёт базу данных SQLite (data.db), если она ещё не существует.
+o	Таблица notes с полями:
+	id (целое число, автоинкремент)
+	content (текст заметки)
+•	Добавление заметок
+o	Пользователь через веб-форму вводит текст новой заметки.
+o	Приложение сохраняет запись в базу данных.
+•	Отображение списка заметок
+o	На главной странице отображаются все сохранённые заметки в виде списка.
+•	Минималистичный дизайн с Bootstrap
+o	Современный аккуратный внешний вид благодаря подключению Bootstrap 5 через CDN.
+•	Работа через браузер
+o	Взаимодействие осуществляется полностью через web-интерфейс.
+Компонент	Реализация
+Язык программирования	Python 3.9
+Web-фреймворк	Flask
+База данных	SQLite
+Frontend	HTML + Bootstrap 5
+Контейнеризация	Docker, Docker Compose
+Создайте структуру проекта:
+mkdir -p ~/docker_lab/
+cd ~/docker_lab
+mkdir app
+mkdir data
+
+Создайте файл app.py в каталоге app со следующим содержимым:
+from flask import Flask, request, redirect, url_for, render_template_string
+import sqlite3
+import os
+app = Flask(__name__)
+# Путь к базе данных внутри контейнера
+DB_PATH = '/app/data/data.db'
+def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # Создать папку data, если нет
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)')
+    conn.commit()
+    conn.close()
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    if request.method == 'POST':
+        note = request.form['note']
+        c.execute('INSERT INTO notes (content) VALUES (?)', (note,))
+        conn.commit()
+        return redirect(url_for('index'))
+    c.execute('SELECT id, content FROM notes')
+    notes = c.fetchall()
+    conn.close()
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Заметки в Docker</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-light">
+    <div class="container py-5">
+        <h1 class="mb-4 text-center">📝 Мои заметки</h1>
+        <form method="post" class="mb-4">
+            <div class="input-group">
+                <input type="text" name="note" class="form-control" placeholder="Введите новую заметку" required>
+                <button class="btn btn-primary" type="submit">Добавить</button>
+            </div>
+        </form>
+        <div class="card shadow">
+            <div class="card-body">
+                {% if notes %}
+                    <ul class="list-group">
+                        {% for id, content in notes %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span>{{ content }}</span>
+                                <span class="badge bg-secondary rounded-pill">#{{ id }}</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-muted">Пока нет ни одной заметки...</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    </body>
+    </html>
+    ''', notes=notes)
+if __name__ == "__main__":
+    init_db()
+    app.run(host='0.0.0.0', port=5000)
+
+
+2. Написание Dockerfile
+Создайте файл Dockerfile (Название обязательно с большой буквы):
+# Используем официальный минимальный образ Python версии 3.9
+FROM python:3.9-slim
+# Устанавливаем рабочую директорию внутри контейнера
+WORKDIR /app
+# Копируем файл приложения внутрь контейнера
+COPY app/app.py app.py
+# Устанавливаем необходимые зависимости (только Flask)
+RUN pip install flask
+# Открываем порт 5000 внутри контейнера
+EXPOSE 5000
+# Команда для запуска приложения при старте контейнера
+CMD ["python", "app.py"]
+
+Наш Dockerfile состоит из ряда инструкций:
+•	FROM: базовый образ.
+•	WORKDIR: где будет работать приложение.
+•	COPY: перенос файла в контейнер.
+•	RUN: установка зависимостей.
+•	EXPOSE: необязательно открывает порт, но служит подсказкой.
+•	CMD: что запустить по умолчанию.
+
+
+3. Создание docker-compose.yml
+Создайте файл docker-compose.yml:
+services:    # Определение сервисов (контейнеров)
+  web:       # Имя сервиса
+    build: . # Построить образ из текущей директории (где находится Dockerfile)
+    ports:
+      - "8080:5000" # Пробрасываем порт: внешний 8080 -> внутренний 5000
+    volumes:
+      - ./data:/app # Подключаем папку data на машине в папку /app внутри контейнера
+                    # (чтобы база данных SQLite сохранялась вне контейнера)
+
+
+4. Сборка и запуск контейнера
+Запустите:
+docker compose up --build -d
+Приложение будет доступно по адресу:
+http://<IP-адрес вашей виртуальной машины>:8080
+
+Наш docker-compose состоит из ряда инструкций:
+•	services: сколько и какие сервисы запускаем.
+•	build: откуда строим образ (из текущей папки).
+•	ports: настройка доступа снаружи в контейнер.
+•	volumes: сохранять данные снаружи контейнера (иначе при пересборке всё пропадёт).
+
+
+5. Тестирование
+•	Откройте веб-браузер.
+•	Перейдите на страницу http://<IP-адрес>:8080.
+ 
+•	Введите текст заметки в поле и нажмите Добавить.
+•	Убедитесь, что новая заметка появилась в списке.
+ 
+
+7. Завершение работы
+Остановите контейнер:
+docker compose down
