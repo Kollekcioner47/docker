@@ -1,0 +1,347 @@
+5.2. Создание структуры каталогов и файлов
+На управляющем узле создайте новую директорию для проекта:
+mkdir swarm-app
+cd swarm-app
+Создаём базовую структуру папок для всех компонентов приложения:
+mkdir backend frontend
+Создаём директорию для хранения дополнительных конфигураций и файлов для базы данных:
+mkdir mysql_data
+mkdir mysql-init
+Структура проекта должна выглядеть так:
+swarm-app/
+├── backend/
+├── frontend/
+├── mysql_data/
+├── mysql-init
+5.3. Создание файлов приложения
+1. Переходим в папку backend/ и создаём приложение на Flask:
+cd backend
+touch app.py requirements.txt Dockerfile
+cd ..
+
+•  app.py — исходный код сервера backend;
+•  requirements.txt — список зависимостей Python;
+•  Dockerfile — инструкции для сборки образа backend-приложения.
+2. Переходим в папку frontend/ и создаём фронтенд-приложение:
+cd frontend
+touch default.conf Dockerfile
+cd ..
+
+•  default.conf — конфигурационный файл Nginx
+•  Dockerfile — инструкции для сборки образа frontend-приложения.
+cd mysql-init
+touch init.sql
+cd ..
+
+3. В корне проекта создаём главный файл docker-swarm.yml, который будет описывать стек приложения:
+touch docker-swarm.yml
+
+5.3. Итоговая структура проекта на этом этапе
+swarm-app/
+├── backend/
+│   ├── app.py
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── default.conf
+│   └── Dockerfile
+├── mysql_data/   # директория для volume MySQL
+├── mysql-init/
+│   └── init.sql
+└── docker-swarm.yml
+На этом этапе мы подготовили каркас проекта.
+Следующим шагом будет заполнение файлов содержимым:
+•	Код backend (Flask-приложение с подключением к MySQL);
+•	Конфигурация Nginx frontend (проксирование в приложение);
+•	Описание Dockerfile для каждого сервиса;
+•	Сборка docker-compose.yml для Swarm-стека.
+5.4. Создание кода backend-приложения
+5.4.1. Файл backend/requirements.txt
+Сначала определим зависимости нашего приложения:
+flask
+flask-mysqldb
+5.4.2. Файл backend/app.py
+Создаём минимальный рабочий код Flask-приложения с подключением к MySQL.
+from flask import Flask, request, redirect, url_for, render_template_string
+from flask_mysqldb import MySQL
+
+app = Flask(__name__)
+
+# Настройки подключения к MySQL
+app.config['MYSQL_HOST']     = 'db'
+app.config['MYSQL_USER']     = 'user'
+app.config['MYSQL_PASSWORD'] = 'password'
+app.config['MYSQL_DB']       = 'appdb'
+
+# Инициализация MySQL
+mysql = MySQL(app)
+
+# HTML-шаблон с Bootstrap
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Заметки в Docker Swarm</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container py-5">
+    <h1 class="mb-4 text-center">📝 Заметки в Swarm</h1>
+
+    <form method="post" action="/" class="mb-4">
+        <div class="input-group">
+            <input type="text" name="note" class="form-control" placeholder="Введите новую заметку" required>
+            <button class="btn btn-primary" type="submit">Добавить</button>
+        </div>
+    </form>
+
+    <div class="card shadow">
+        <div class="card-body">
+            {% if notes %}
+                <ul class="list-group">
+                    {% for id, content in notes %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>{{ content }}</span>
+                            <span class="badge bg-secondary rounded-pill">#{{ id }}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-muted">Пока нет ни одной заметки...</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+</body>
+</html>
+'''
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    conn = mysql.connection
+    cursor = conn.cursor()
+    if request.method == 'POST':
+        # читаем поле note из формы
+        note = request.form.get('note')
+        if note:
+            cursor.execute("INSERT INTO entries (name) VALUES (%s)", (note,))
+            conn.commit()
+        return redirect(url_for('index'))
+
+    # GET: читаем все записи
+    cursor.execute("SELECT id, name FROM entries ORDER BY id")
+    notes = cursor.fetchall()
+    cursor.close()
+
+    return render_template_string(HTML_TEMPLATE, notes=notes)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+5.5. Создание Dockerfile для backend-приложения
+Перейдите в директорию backend/ и создайте или откройте файл Dockerfile:
+cd backend
+nano Dockerfile
+Вставьте следующий код:
+FROM python:3.9-slim
+
+# Установка зависимостей для компиляции mysqlclient
+RUN apt-get update && apt-get install -y \
+    gcc \
+    default-libmysqlclient-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "app.py"]
+
+Загрузка в реестр Docker Hub
+После нам необходимо собрать образ и загрузить его в реестр, в качестве примера я буду использовать публичный реестр Docker Hub
+Сначала вам нужно осуществить аутентификацию, для этого введите команду и свой логин и пароль:
+docker login -u ваша_учётная_запись
+после ввода логина и пароля вы увидите сообщение об успешном входе в учётную запись
+ 
+После этого вы можете собрать ваш образ и загрузить его в реестр:
+Docker build . -t ваша_учётная_запись/backend
+Docker push ваша_учётная_запись/backend
+
+5.6. Создание frontend-приложения
+5.6.1. Файл frontend/default.conf
+
+Перейдите в папку frontend и создайте файл default.conf:
+cd ../frontend
+nano default.conf
+Вставьте следующий код:
+server {
+    listen 80;
+
+    # Прокси всех запросов (GET, POST и т.д.) на backend
+    location / {
+        proxy_pass         http://backend:5000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
+
+5.6.2. Файл frontend/Dockerfile
+Создаём Dockerfile для frontend:
+nano Dockerfile
+И вставляем код:
+# Используем nginx как веб-сервер
+FROM nginx:1.27.5-alpine
+# Копируем HTML-файл в стандартную директорию nginx
+COPY default.conf /etc/nginx/conf.d/default.conf 
+После этого вы можете собрать ваш образ и загрузить его в реестр:
+docker build . -t ваша_учётная_запись/frontend
+docker push ваша_учётная_запись/ frontend
+cd ..
+5.7 Создание файла mysql-init/init.sql
+cd mysql-init
+nano init.sql
+Вставьте код, который создаёт целевую таблицу:
+CREATE DATABASE IF NOT EXISTS appdb;
+USE appdb;
+
+CREATE TABLE IF NOT EXISTS entries (
+  id   INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255)      NOT NULL
+);
+После сохраните и вернитесь на уровень вверх:
+cd ..
+
+6. Создание docker-swarm.yml для запуска в Docker Swarm
+Мы создадим файл, который:
+•	запускает три сервиса:
+o	frontend — перенаправленеи к приложению
+o	backend — Flask API
+o	db —MySQL
+•	подключает их в одну оверлейную сеть
+•	сохраняет данные MySQL в volume
+•	указывает количество реплик (frontend и backend — по 2)
+Создайте файл в корне проекта:
+nano docker-swarm.yml
+Вставьте:
+
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: appdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    networks:
+      - appnet
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  backend:
+    image: kollekcioner47/backend
+    depends_on:
+      - db
+    environment:
+      MYSQL_DATABASE_HOST: db
+      MYSQL_DATABASE_USER: user
+      MYSQL_DATABASE_PASSWORD: password
+      MYSQL_DATABASE_NAME: appdb
+    networks:
+      - appnet
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+  frontend:
+    image: kollekcioner47/frontend
+    ports:
+      - "8080:80"
+    networks:
+      - appnet
+    depends_on:
+      - backend
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  db-data:
+
+networks:
+  appnet:
+    driver: overlay
+
+Объяснение ключевых моментов
+•	volumes: db-data — сохраняет базу между перезапусками.
+•	deploy.replicas — создаёт отказоустойчивость фронта и бэка.
+•	networks.overlay — даёт сервисам доступ друг к другу по имени (например, http://backend:5000).
+•	placement.constraints — закрепляем базу только за менеджером (где volume будет доступен локально). Это простое решение — более сложное потребует Galera или Vitess.
+Развёртывание в Swarm
+Если кластер уже инициализирован (docker swarm init), то для развертывания:
+docker stack deploy -c docker-compose.yml myapp
+Далее нужно подождать несколько минут, пока скачаются образы и запустится приложение, проверить статус можно с помощью команды:
+docker service ls
+Все контейнеры должны быть в статусе replicated и полное количество реплик:
+ 
+
+6. Тестирование отказоустойчивости и работоспособности приложения
+6.1. Проверка доступности веб-интерфейса
+1.	Открой браузер и перейди по IP-адресу любого узла к порту, который проброшен (например, http://<IP-адрес-любого-ноды>:8080 или просто http://localhost:8080).
+2.	Убедись, что:
+o	Загружается веб-интерфейс.
+o	Отображаются записи (если добавлялись).
+o	Можно добавить новую запись — она сохраняется и отображается после обновления.
+ 
+________________________________________
+6.2. Проверка отказоустойчивости backend
+
+Тест 1: "Что будет, если упадёт один рабочий сервер?"
+1.	Открываем терминал и смотрим, кто где работает:
+docker node ls
+docker service ps myapp_backend
+Убедись, что myapp_backend запущен на двух разных воркерах.
+ 
+2.	Теперь симулируем отказ: говорим одному воркеру, что он временно "устал":
+docker node update --availability drain <ID_ноды>
+Всё! Swarm сразу же поймёт: «О, этот сервер недоступен, надо срочно перенести задачу!»
+3.	Через несколько секунд:
+docker service ps myapp_backend
+ 
+Ты увидишь, как реплика, которая была на ушедшем воркере, перезапускается на другом — всё продолжает работать! 
+4.	Проверь браузером: заметки отображаются? Можно добавить новую? Всё ок?
+Тест 2: "Что будет, если упадёт менеджер?"
+У нас база данных прикреплена к менеджеру. А значит:
+•	Пока работает менеджер — всё супер.
+•	Упадёт менеджер —  база недоступна.
+Что делаем:
+1.	Идём на виртуалку с менеджером и просто выключаем Docker (или саму машину):
+sudo systemctl stop docker
+2.	Теперь попробуй открыть сайт и добавить новую заметку.
+Что произойдёт?  Ошибка — и это нормально! Бэкенд не может подключиться к MySQL.
+Включаем менеджер обратно:
+sudo systemctl start docker
+Ждём 5–10 секунд. Swarm восстанавливает myapp_db, и всё снова работает!
+Тест 3: "А если нам нужен больше мощности?"
+Хочешь обработать больше пользователей? Легко!
+docker service scale myapp_backend=5
+docker service scale myapp_frontend=4
+Swarm сам раскидает новые копии по всем свободным серверам.
+Ты даже не думаешь, куда и как — всё делает кластер!
+
+Итого
+•	Один сервер падает — приложение продолжает работать.
+•	Менеджер падает — база временно недоступна, но восстанавливается автоматически.
+•	Масштабирование — это просто одна команда.
+Docker Swarm — это простой и мощный инструмент для создания отказоустойчивых распределённых приложений. Даже если часть инфраструктуры выходит из строя, Swarm сам всё восстанавливает, перераспределяет и масштабирует — без участия человека. И главное — вы только что сами это увидели и протестировали вживую.
