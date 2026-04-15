@@ -54,7 +54,7 @@ swarm-app/
 •	Код backend (Flask-приложение с подключением к MySQL);
 •	Конфигурация Nginx frontend (проксирование в приложение);
 •	Описание Dockerfile для каждого сервиса;
-•	Сборка docker-compose.yml для Swarm-стека.
+•	Сборка docker-swarm.yml для Swarm-стека.
 5.4. Создание кода backend-приложения
 5.4.1. Файл backend/requirements.txt
 Сначала определим зависимости нашего приложения:
@@ -290,7 +290,7 @@ networks:
 •	placement.constraints — закрепляем базу только за менеджером (где volume будет доступен локально). Это простое решение — более сложное потребует Galera или Vitess.
 Развёртывание в Swarm
 Если кластер уже инициализирован (docker swarm init), то для развертывания:
-docker stack deploy -c docker-compose.yml myapp
+docker stack deploy -c docker-swarm.yml myapp
 Далее нужно подождать несколько минут, пока скачаются образы и запустится приложение, проверить статус можно с помощью команды:
 docker service ls
 Все контейнеры должны быть в статусе replicated и полное количество реплик:
