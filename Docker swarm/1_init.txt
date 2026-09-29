@@ -1,8 +1,0 @@
-Собираем кластер из трёх машин согласно инструкции:
-https://docs.docker.com/engine/swarm/swarm-tutorial/create-swarm/
-
-посмотреть список нод
-docker  node ls
-
-посмотреть токен для подключения
-docker swarm join-token worker
