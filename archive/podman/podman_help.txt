@@ -1,0 +1,41 @@
+# справочная информация
+podman --help # список доступных команд
+podman <command> --help # информация по команде
+ 
+# работа с образами
+podman search nginx # поиск образов по ключевому слову nginx
+ 
+podman pull ubuntu # скачивание последней версии (тег по умолчанию latest) официального образа ubuntu (издатель не указывается) из репозитория по умолчанию docker.io/library
+podman pull quay.io/bitnami/nginx:latest # скачивание последней версии образа nginx от издателя bitnami из репозитория quay.io/bitnami
+podman pull docker.io/library/ubuntu:18.04 # скачивание из репозитория docker.io официального образа ubuntu с тегом 18.04
+ 
+podman images # просмотр локальных образов
+ 
+podman rmi <image_name>:<tag> # удаление образа. Вместо <image_name>:<tag> можно указать <image_id>. Для удаления образа все контейнеры на его основе должны быть как минимум остановлены
+podman rmi --all # удаление всех образов
+ 
+# работа с контейнерами
+podman run hello-world # Hello, world! в мире контейнеров
+podman run -it ubuntu bash # запуск контейнера ubuntu и выполнение команды bash в интерактивном режиме
+podman run --detach --name nginx --publish 9090:8080 quay.io/bitnami/nginx:1.20.2 # запуск контейнера nginx с отображением (маппингом) порта 9090 хоста на порт 8080 внутрь контейнера
+podman run --detach --name mongodb docker.io/library/mongo:4.4.10 # запуск контейнера mongodb с именем mongodb в фоновом режиме. Данные будут удалены при удалении контейнера!
+ 
+podman ps # просмотр запущенных контейнеров
+podman ps -a # просмотр всех контейнеров (в том числе остановленных)
+podman stats --no-stream # просмотр статистики. Если у пользователя нет прав доступа root, то необходимо переключиться на cgroups v2
+ 
+podman create alpine # создание контейнера из образа alpine
+ 
+podman start <container_name> # запуск созданного контейнера. Вместо <container_name> можно указать <container_id>
+podman start --all # запуск всех созданных контейнеров
+ 
+podman stop <container_name> # остановка контейнера. Вместо <container_name> можно указать <container_id>
+podman stop --all # остановка всех контейнеров
+ 
+podman rm <container_name> # удаление контейнера. Вместо <container_name> можно указать <container_id>
+podman rm --all # удаление всех контейнеров
+ 
+# система
+podman system info # общая информация о системе
+podman system df # занятое место на диске
+podman system prune -af # удаление неиспользуемых данных и очистка диска

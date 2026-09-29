@@ -1,0 +1,26 @@
+Установим GUI для управления, вариантов много, выберем портейнер
+устанавливаем согласно инструкции на менеджера
+https://docs.portainer.io/start/install-ce/server/swarm/linux
+
+
+давайте создадим стэк из файла
+создадим файл redmine-stack.yml
+
+version: "3"
+services:
+    redmine:
+        image: redmine
+        ports:
+            - 3000:3000
+        environment:
+            REDMINE_DB_MYSQL: db
+            REDMINE_DB_USERNAME: redmine
+            REDMINE_DB_PASSWORD: password
+
+    db:
+        image: mysql
+        environment:
+            MYSQL_DATABASE: redmine
+            MYSQL_USER: redmine
+            MYSQL_PASSWORD: password
+            MYSQL_ROOT_PASSWORD: root

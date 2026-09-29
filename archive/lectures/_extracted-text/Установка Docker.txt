@@ -1,0 +1,48 @@
+
+Для Windows или Mac скачайте Docker Desktop по ссылке:
+https://www.docker.com/products/docker-desktop/
+Установка для Linux (Кроме Ubuntu) см. ссылку:
+https://docs.docker.com/engine/install/
+
+Для Ubuntu:
+Обновите apt индекс пакетов и установите пакеты, чтобы разрешить apt использование репозитория через HTTPS:
+                                                                sudo apt-get update
+                                                                
+                                                                sudo apt-get install \
+                                                                    ca-certificates \
+                                                                    curl \
+                                                                    gnupg \
+                                                                    lsb-release
+Добавьте официальный GPG-ключ Docker:
+                                                                $ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+Используйте следующую команду для настройки стабильного репозитория.
+                                                                echo \
+                                                                  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+                                                                  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+установите последнюю версию Docker Engine и containerd
+sudo apt-get install docker-ce docker-ce-cli containerd.io
+Убедитесь, что Docker Engine установлен правильно, запустив hello-world образ.
+sudo docker run hello-world
+
+
+
+
+
+Действия после установки для Linux
+Создайте docker группу, чтобы использовать docker без sudo
+sudo groupadd docker
+Добавьте пользователя в docker группу.
+sudo usermod -aG docker $USER
+Перезайдите в систему 
+Убедитесь, что вы можете запускать docker команды без sudo.
+docker run hello-world
+
+
+Установка docker compose
+Запустите эту команду, чтобы загрузить текущую стабильную версию Docker Compose:
+sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+Примените исполняемые разрешения к двоичному файлу:
+sudo chmod +x /usr/local/bin/docker-compose
+Протестируйте установку.
+docker-compose --version
+

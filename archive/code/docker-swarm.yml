@@ -1,0 +1,52 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: appdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    networks:
+      - appnet
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  backend:
+    image: kollekcioner47/backend
+    depends_on:
+      - db
+    environment:
+      MYSQL_DATABASE_HOST: db
+      MYSQL_DATABASE_USER: user
+      MYSQL_DATABASE_PASSWORD: password
+      MYSQL_DATABASE_NAME: appdb
+    networks:
+      - appnet
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+  frontend:
+    image: kollekcioner47/frontend
+    ports:
+      - "8080:80"
+    networks:
+      - appnet
+    depends_on:
+      - backend
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  db-data:
+
+networks:
+  appnet:
+    driver: overlay
