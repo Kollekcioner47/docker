@@ -1,0 +1,40 @@
+# Секреты Compose: значение лежит в файле на машине, а в контейнер
+# попадает файлом /run/secrets/<имя> — его читает само приложение.
+# В docker inspect контейнера при этом видно только имя секрета.
+#
+# Файл секрета создаётся командой из практики и в курс не входит:
+# каталог ./secrets/ перечислен в .gitignore курса.
+#
+# Запуск и уборка:
+#     docker compose up -d
+#     docker compose logs app
+#     docker compose down
+
+name: p9-compose-secrets
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_DB: appdb
+      # Путь к файлу, а не пароль: суффикс _FILE понимает сам образ,
+      # его точка входа читает файл и передаёт значение в postgres.
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+
+  app:
+    image: alpine:3.24
+    # Приложение читает секрет из /run/secrets и печатает не значение,
+    # а только длину и отпечаток: значение в журнале — это утечка.
+    command:
+      - sh
+      - -c
+      - wc -c < /run/secrets/db_password; sha256sum /run/secrets/db_password
+    secrets:
+      - db_password
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt

@@ -1,0 +1,48 @@
+# Свой реестр образов: registry:3 с TLS, аутентификацией и томом данных.
+#
+# Запуск:
+#     docker compose up -d
+#     docker compose ps
+#
+# Имя проекта задано явно: иначе Compose возьмёт имя каталога, и у разных
+# студентов том с данными назывался бы по-разному.
+name: registry-lab
+
+services:
+  registry:
+    image: registry:3
+    container_name: p11-registry
+    restart: unless-stopped
+
+    # Порт публикуется на адрес машины admin, а не на все интерфейсы:
+    # в реестре лежат свои образы, и отвечать каждому он не должен.
+    ports:
+      - "${REGISTRY_BIND:-10.0.2.5}:5000:5000"
+
+    volumes:
+      # Настройка реестра. Путь внутри контейнера важен: registry:3 читает
+      # её из /etc/distribution/config.yml, а registry:2 и старые инструкции
+      # — из /etc/docker/registry/config.yml. Файл, смонтированный по
+      # старому пути, реестр не заметит: он запустится по HTTP и без пароля.
+      - ./registry/config.yml:/etc/distribution/config.yml:ro
+      # Сертификат и ключ, выпущенные командами из практики.
+      - ./certs:/certs:ro
+      # Файл паролей htpasswd, созданный командой htpasswd.
+      - ./auth:/auth:ro
+      # Данные реестра: слои и манифесты. Именованный том, а не каталог
+      # рядом с практикой: его не удалят вместе с каталогом.
+      - registry-data:/var/lib/registry
+
+    # healthcheck отвечает на вопрос «реестр жив?» до того, как это заметит
+    # Docker. Проверяется отладочный порт внутри контейнера: он не требует
+    # пароля, в отличие от /v2/.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null",
+             "http://127.0.0.1:5001/debug/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  registry-data:

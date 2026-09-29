@@ -1,0 +1,51 @@
+# Ограничения ресурсов в Compose. Практика 8.
+#
+# Проверка того, что получилось:
+#
+#     docker compose -f compose-limits.yml up -d
+#     docker inspect p8-resources-web-1 \
+#         --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}'
+#     docker compose -f compose-limits.yml down
+#
+# Поле version: здесь отсутствует намеренно: в Compose v2 оно устарело.
+
+name: p8-resources
+
+services:
+
+  web:
+    image: alpine:3.24
+    # Контейнер ничего не делает: он нужен, чтобы посмотреть настройки
+    # и запустить нагрузку руками командой docker compose exec.
+    command: ["sleep", "3600"]
+    deploy:
+      resources:
+        limits:
+          # Жёсткий предел: превышение означает убийство контейнера
+          # ядром, а не «замедление». Отсюда код возврата 137.
+          cpus: "0.50"
+          memory: 96M
+          # Защита от «бомбы форков»: приложение, которое плодит процессы,
+          # получает отказ, а не роняет всю машину.
+          pids: 64
+        reservations:
+          # Мягкая заявка. В Compose она почти ничего не меняет (машина
+          # одна), в Swarm участвует в размещении задач по узлам.
+          memory: 48M
+    # Дескрипторы файлов: значение берут не меньше того, что нужно
+    # приложению на пике, иначе оно упадёт с «too many open files».
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    volumes:
+      # Файл нагрузки монтируется только для чтения.
+      - ./stress:/stress:ro
+    networks:
+      - lab
+
+networks:
+  # Своя сеть, чтобы контейнер не оказался в сети по умолчанию:
+  # там не работает разрешение имён (практика 5).
+  lab:
+    driver: bridge

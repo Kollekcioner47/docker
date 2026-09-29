@@ -1,0 +1,57 @@
+# Настройка реестра образов (distribution v3). Читает её сам реестр,
+# а не Docker: файл монтируется в контейнер как
+# /etc/distribution/config.yml.
+#
+# ПЕРВАЯ СТРОКА ОБЯЗАТЕЛЬНА. Реестр третьей версии без неё не работает:
+# он отвечает
+#     configuration error: error parsing config.yml:
+#     unsupported version: ""
+# и не стартует вовсе. Переменной окружения эту строку не заменить:
+# версия читается раньше, чем применяются переменные. Это не то поле
+# version, которое устарело в файлах Compose: здесь оно про формат
+# самого файла реестра.
+
+version: 0.1
+
+log:
+  level: info
+  formatter: text
+  fields:
+    service: registry
+    environment: lab
+
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  # Разрешение на удаление тегов. Без него реестр отвечает на DELETE
+  # ошибкой 405, и убрать отправленный образ нечем.
+  delete:
+    enabled: true
+
+http:
+  addr: :5000
+  # TLS. Без него Docker отказывается работать с реестром: по открытому
+  # каналу уезжают и образы, и пароль от docker login. Сертификат
+  # выпускается командами из практики и лежит рядом, в каталоге certs.
+  tls:
+    certificate: /certs/registry.crt
+    key: /certs/registry.key
+  # Отладочный порт слушает только localhost контейнера и наружу
+  # не публикуется: через него работает healthcheck.
+  debug:
+    addr: 127.0.0.1:5001
+
+# Аутентификация по файлу паролей в формате htpasswd. Путь указан внутри
+# контейнера; сам файл создаётся командой htpasswd и в курс не попадает.
+auth:
+  htpasswd:
+    realm: registry-lab
+    path: /auth/htpasswd
+
+# Реестр сам раз в 10 секунд проверяет, что каталог данных доступен:
+# три неудачи подряд — на /debug/health отвечает кодом 503.
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3

@@ -1,0 +1,210 @@
+# Стек приложения «Заметки» для Docker Swarm (практика 7).
+#
+# Развёртывается так (с машины admin, из каталога files/07_swarm):
+#     docker stack deploy -c docker-stack.yml --resolve-image never notes
+#
+# Двух вещей в этом файле нет намеренно:
+#
+#   * паролей. Здесь только имена секретов; значения создаются один раз
+#     командой docker secret create и в файл не попадают никогда.
+#     Почему так — практика 9;
+#   * ключа depends_on. Swarm его игнорирует: задачи разных сервисов
+#     запускаются одновременно, а готовность проверяется healthcheck.
+#
+# Теги образов закреплены: latest в кластере означает, что разные узлы
+# могут запустить разные версии одного сервиса.
+
+services:
+
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: notes
+      MYSQL_USER: notes
+      # Суффикс _FILE: образ MySQL сам прочитает значение из файла.
+      # Так пароль не попадает ни в docker inspect, ни в /proc/1/environ.
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
+    secrets:
+      - mysql_root_password
+      - mysql_password
+    configs:
+      # Схема передаётся в контейнер файлом. Именно configs, а не
+      # bind mount каталога: том или каталог с диска менеджера
+      # на другом узле просто не найдётся, а config приезжает
+      # вместе с описанием сервиса.
+      - source: mysql_init
+        target: /docker-entrypoint-initdb.d/init.sql
+    volumes:
+      # Именованный том. Он создаётся на том узле, где запустится
+      # задача, и переезд задачи на другой узел означает другой,
+      # пустой том. Разбор этого ограничения — раздел 11 практики.
+      - db-data:/var/lib/mysql
+    healthcheck:
+      # mysqladmin ping отвечает успехом и при неверных учётных данных:
+      # нас интересует живость сервера, а не доступ к базе.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      # Первый запуск MySQL разворачивает каталог данных: это долго,
+      # и задача не должна считаться больной всё это время.
+      start_period: 60s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          # Узел с меткой. Метка ставится командой
+          # docker node update --label-add role=db node1.
+          # Так база не привязывается ни к имени машины, ни к роли
+          # менеджера: узел можно заменить, не трогая файл стека.
+          - node.labels.role == db
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        # stop-first, а не start-first: два процесса MySQL с одним
+        # каталогом данных на одном диске не уживутся, и обновление
+        # «без остановки» здесь означало бы порчу базы.
+        order: stop-first
+        parallelism: 1
+        delay: 20s
+        failure_action: rollback
+      rollback_config:
+        order: stop-first
+        parallelism: 1
+      resources:
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    networks:
+      - appnet
+
+  backend:
+    image: notes-backend:1.0
+    environment:
+      MYSQL_HOST: db
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: notes
+      MYSQL_USER: notes
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
+    secrets:
+      - mysql_password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request as u;
+          u.urlopen('http://127.0.0.1:5000/healthz', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          # Приложение держим на рабочих узлах: менеджер хранит
+          # состояние кластера, и нагружать его приложением незачем.
+          - node.role == worker
+      update_config:
+        # start-first: сначала поднимается новая задача, потом гасится
+        # старая. Для stateless-приложения это обновление без простоя.
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 30s
+      rollback_config:
+        order: start-first
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 60s
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 64M
+        limits:
+          # Пределы выставлены по измерению, а не «на глаз»: если
+          # поставить меньше, чем приложению нужно, ядро будет
+          # убивать задачу с кодом 137. Разбор — практика 8.
+          cpus: "0.50"
+          memory: 256M
+    networks:
+      - appnet
+
+  frontend:
+    image: notes-frontend:1.0
+    ports:
+      # 80 — порт на каждой ноде кластера, 8080 — порт nginx внутри
+      # контейнера, который работает не от root. Порт 80 берётся
+      # не случайно: он уже открыт в файрволе после практики 1.
+      - "80:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == worker
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        order: start-first
+        parallelism: 1
+      resources:
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    networks:
+      - appnet
+
+networks:
+  appnet:
+    # overlay — сеть поверх всех узлов кластера: контейнеры на разных
+    # машинах видят друг друга так, будто стоят на одной.
+    driver: overlay
+    # attachable разрешает подключить к этой сети обычный контейнер
+    # (docker run --network notes_appnet) для отладки. Без этого флага
+    # в сеть стека попасть нельзя, и разбираться с «сервис не видит
+    # сервис» становится нечем.
+    attachable: true
+
+volumes:
+  # Том для данных MySQL. При удалении стека Docker его не тронет —
+  # данные должны переживать и пересоздание стека тоже.
+  db-data:
+
+configs:
+  # Файл схемы. Docker передаст его в swarm и смонтирует в контейнер
+  # базы по пути из ключа target выше.
+  mysql_init:
+    file: ./mysql-init/init.sql
+
+secrets:
+  # external: секреты создаются заранее командой docker secret create
+  # и не описываются в файле стека. Значение в файле стека означало бы,
+  # что пароль лежит в репозитории.
+  mysql_root_password:
+    external: true
+  mysql_password:
+    external: true

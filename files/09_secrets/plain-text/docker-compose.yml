@@ -1,0 +1,28 @@
+# docker-course: insecure-example
+#
+# ПРИМЕР ТОГО, КАК ДЕЛАТЬ НЕЛЬЗЯ: пароль базы записан прямо в файл
+# и передан контейнеру переменной окружения.
+#
+# Почему это плохо, хотя всё работает:
+#
+#   * файл лежит рядом с проектом и уезжает в git вместе с ним;
+#     пароль остаётся в истории репозитория, даже если строку убрать;
+#   * значение печатает docker compose config — то есть любой вывод,
+#     который показывают коллеге или прикладывают к задаче;
+#   * переменную окружения живого контейнера видно в docker inspect,
+#     а изнутри контейнера — в /proc/1/environ.
+#
+# Сравнить с правильным вариантом: ../compose-secrets/docker-compose.yml
+#
+# Убрать за собой:
+#     docker compose down
+
+name: p9-plain
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_DB: appdb
+      POSTGRES_PASSWORD: mysecretpass

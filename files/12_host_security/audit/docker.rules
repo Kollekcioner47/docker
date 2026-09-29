@@ -1,0 +1,62 @@
+# Правила аудита auditd для хоста с Docker (практика 12).
+#
+# Файл устанавливается в /etc/audit/rules.d/99-docker.rules и подхватывается
+# командой augenrules --load. Имя начинается с 99 не случайно: augenrules
+# складывает все файлы каталога в один по алфавиту, и наши правила должны
+# идти последними, чтобы не затирать системные.
+#
+# Ключ -k есть у каждого правила наблюдения. Без ключа событие попадёт
+# в /var/log/audit/audit.log, но найти его будет нечем: ausearch ищет
+# именно по ключу. Правило без -k бесполезно.
+#
+# Права у -p: r — чтение, w — запись, x — выполнение, a — изменение
+# атрибутов. Для настроек достаточно wa, для бинарников — x.
+
+# Ограничение очереди событий. При всплеске активности (например, во время
+# сборки образа) auditd может потерять события: в журнале появится
+# «audit: backlog limit exceeded». Значение по умолчанию мало для машины,
+# на которой собирают образы.
+-b 8192
+
+# --- Настройки демона: кто и когда менял конфигурацию ---
+-w /etc/docker -p wa -k docker_config
+-w /etc/docker/daemon.json -p wa -k docker_config
+-w /etc/default/docker -p wa -k docker_config
+
+# --- Служба и сокет: кто перезапускал демон и кто общался с ним ---
+-w /etc/systemd/system/docker.service -p wa -k docker_service
+-w /etc/systemd/system/docker.socket -p wa -k docker_service
+-w /usr/lib/systemd/system/docker.service -p wa -k docker_service
+-w /usr/lib/systemd/system/docker.socket -p wa -k docker_service
+
+# Сокет: путь /run/docker.sock, а /var/run/docker.sock — он же через
+# символическую ссылку /var/run -> /run. auditd не любит наблюдение
+# за символическими ссылками, поэтому в правиле указан настоящий путь.
+-w /run/docker.sock -p rwa -k docker_socket
+
+# --- Данные Docker: образы, контейнеры, тома ---
+# Запись в этот каталог означает изменение слоёв, состояния контейнеров
+# или содержимого томов.
+-w /var/lib/docker -p wa -k docker_data
+
+# --- Бинарники: наблюдение с правом x срабатывает при запуске ---
+-w /usr/bin/docker -p x -k docker_binary
+-w /usr/bin/dockerd -p x -k docker_binary
+-w /usr/bin/docker-proxy -p x -k docker_binary
+-w /usr/bin/containerd -p x -k docker_binary
+-w /usr/bin/containerd-shim-runc-v2 -p x -k docker_binary
+-w /usr/bin/runc -p x -k docker_binary
+
+# --- Сам аудит: правка правил аудита — событие, которое надо заметить ---
+-w /etc/audit/rules.d -p wa -k audit_config
+-w /etc/audit/auditd.conf -p wa -k audit_config
+
+# Отдельная запись на запуск демона с расширенными сведениями о том,
+# от имени кого он запущен. Правило дублирует наблюдение за бинарником,
+# но добавляет поля auid и exe, по которым удобно искать в ausearch.
+-a always,exit -F path=/usr/bin/dockerd -F perm=x -F auid>=1000 -F auid!=unset -k docker_exec
+
+# Запуск контейнера с доступом к сокету Docker: строка ниже ищет открытие
+# сокета процессами с правами на запись. Это то, чем пользуется
+# контейнер, которому пробросили сокет.
+-a always,exit -F path=/run/docker.sock -F perm=rw -F auid>=1000 -F auid!=unset -k docker_socket_access
